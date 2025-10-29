@@ -1,0 +1,25 @@
+[project]
+name = "yt-dyablo"
+version = "0.1.0"
+description = "A yt plugin to read Dyablo datasets."
+readme = "README.md"
+authors = [
+    { name = "Corentin Cadiou", email = "corentin.cadiou@iap.fr" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "yt-experiments",
+    "h5py",
+    "numpy",
+    "yt",
+    "unyt",
+]
+
+[build-system]
+requires = ["flit_core>=3.2,<4"]
+build-backend = "flit_core.buildapi"
+
+[tool.uv.workspace]
+members = [
+    "yt_dyablo",
+]
