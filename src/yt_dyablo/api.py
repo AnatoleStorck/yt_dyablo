@@ -56,7 +56,8 @@ def load_dyablo(
     path = Path(path)
     with h5py.File(path, "r") as f:
         lower_left = f["coordinates"][:][f["connectivity"][:, 0]]
-        cell_sizes = np.ptp(f["coordinates"][:][f["connectivity"][:]], axis=1)
+        upper_right = f["coordinates"][:][f["connectivity"][:, 6]]
+        cell_sizes = upper_right - lower_left
 
         all_data = {
             k: f[k][:]
@@ -65,8 +66,17 @@ def load_dyablo(
         }
         scalar_data = dict(f["scalar_data"].attrs)
 
+    left_edge = lower_left.min(axis=0)
+    right_edge = (lower_left + cell_sizes).max(axis=0)
+
     xc = lower_left + 0.5 * cell_sizes
-    level = np.log2(1 / cell_sizes[:, 0]).astype(int)
+    # Remap xc to [0, 1]
+    dom_size = right_edge - left_edge
+    xc = (xc - left_edge) / dom_size
+    cell_sizes /= dom_size
+
+    # Compute AMR level
+    level = np.round(np.log2(1 / cell_sizes[:, 0])).astype(int)
 
     # Compute the order in which the cells appear in a depth-first octree traversal
     oct = OctTree.from_list(xc, level)
@@ -88,7 +98,7 @@ def load_dyablo(
     ds = yt.load_octree(
         octree_mask=ref_mask,
         data=data,
-        bbox=np.array([[0, 1], [0, 1], [0, 1.0]]),
+        bbox=np.array([left_edge, right_edge]).T,
         num_zones=1,
         dataset_name=f"Dyablo/{path.name}",
         sim_time=scalar_data.get("time", 0.0),
