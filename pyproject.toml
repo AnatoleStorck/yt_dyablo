@@ -1,5 +1,5 @@
 [project]
-name = "yt-dyablo"
+name = "yt_dyablo"
 version = "0.1.0"
 description = "A yt plugin to read Dyablo datasets."
 readme = "README.md"
@@ -10,10 +10,13 @@ requires-python = ">=3.10"
 dependencies = [
     "yt-experiments",
     "h5py",
-    "numpy",
-    "yt",
+    "numpy>=1.21.2",
+    "yt>=4.2.0",
     "unyt",
 ]
+
+[project.entry-points."yt.frontends"]
+DyabloDataset = "yt_dyablo.api:DyabloDataset"
 
 [build-system]
 requires = ["flit_core>=3.2,<4"]
@@ -23,3 +26,34 @@ build-backend = "flit_core.buildapi"
 members = [
     "yt_dyablo",
 ]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "ARG",  # flake8-unused-arguments
+    "C4",   # flake8-comprehensions
+    "B",    # flake8-bugbear
+    "G",    # flake8-logging-format
+    "YTT",  # flake8-2020
+    "UP",   # pyupgrade
+    "I",    # isort
+    "NPY",  # numpy specific rules
+    "RUF031"# incorrectly-parenthesized-tuple-in-subscript
+]
+ignore = [
+    "E501",  # line too long
+]
+
+
+[tool.ruff.lint.isort]
+combine-as-imports = true
+known-third-party = [
+  "numpy",
+  "matplotlib",
+  "unyt",
+  "yaml",
+  "pytest",
+]
+known-first-party = ["yt", "yt_dyablo"]
