@@ -79,56 +79,39 @@ class DyabloOctreeIndex(OctreeIndex):
         block_centers = np.zeros((n_blocks, 3), dtype=np.float64)
         block_levels = np.zeros(n_blocks, dtype=np.uint64)
 
-        # First pass: find the maximum block width (coarsest level)
-        max_block_width = 0.0
-        for block_id in range(n_blocks):
-            # Get cell indices for this block
-            cell_start = block_id * cells_per_block
-            cell_end = cell_start + cells_per_block
+        # Reshape connectivity to group cells by block: (n_blocks, cells_per_block, 8)
+        block_connectivity = connectivity[: n_blocks * cells_per_block].reshape(
+            n_blocks, cells_per_block, 8
+        )
 
-            # Get corners for all cells in this block
-            block_connectivity = connectivity[cell_start:cell_end]
-            block_corners = coordinates[block_connectivity, :]
+        # Extract only min (vertex 0) and max (vertex 6) corners to save memory
+        # Standard hex cell ordering: vertex 0 is front-left-bottom, vertex 6 is back-right-top
+        min_corners = coordinates[
+            block_connectivity[:, :, 0]
+        ]  # (n_blocks, cells_per_block, 3)
+        max_corners = coordinates[
+            block_connectivity[:, :, 6]
+        ]  # (n_blocks, cells_per_block, 3)
 
-            # Compute block bounds from all cell corners
-            # (cells_per_block * 8, 3)
-            all_corners = block_corners.reshape(-1, 3)
-            block_min = np.min(all_corners, axis=0)
-            block_max = np.max(all_corners, axis=0)
-            block_width = block_max - block_min
+        # Compute block bounds for all blocks at once
+        block_min = np.min(min_corners, axis=1)  # (n_blocks, 3)
+        block_max = np.max(max_corners, axis=1)  # (n_blocks, 3)
+        block_width = block_max - block_min  # (n_blocks, 3)
 
-            # Track maximum block width
-            chunk_max_width = np.max(block_width)
-            max_block_width = max(max_block_width, chunk_max_width)
+        # Compute cell centers from min and max corners
+        cell_centers = (min_corners + max_corners) / 2  # (n_blocks, cells_per_block, 3)
+        # Compute block centers as mean of all cell centers
+        block_centers = (cell_centers[:, 0, :] + cell_centers[:, -1, :]) / 2
 
-        # Second pass: compute centers and levels
-        for block_id in range(n_blocks):
-            # Get cell indices for this block
-            cell_start = block_id * cells_per_block
-            cell_end = cell_start + cells_per_block
-
-            # Get corners for all cells in this block
-            block_connectivity = connectivity[cell_start:cell_end]
-            block_corners = coordinates[
-                block_connectivity, :
-            ]  # (cells_per_block, 8, 3)
-
-            # Compute block center: mean of all cell centers
-            # (cells_per_block, 3)
-            cell_centers = np.mean(block_corners, axis=1)
-            block_centers[block_id] = np.mean(cell_centers, axis=0)
-
-            # Compute block size and level
-            all_corners = block_corners.reshape(-1, 3)
-            block_min = np.min(all_corners, axis=0)
-            block_max = np.max(all_corners, axis=0)
-            block_width = block_max - block_min
-
-            # Level is determined by block size relative to coarsest block
-            max_dim_width = np.max(block_width)
-            refinement_ratio = max_block_width / max_dim_width
-            level = np.round(np.log2(refinement_ratio)).astype(np.uint64)
-            block_levels[block_id] = level
+        # Compute block levels using the scalar coarsest-block width.
+        # For each block take its largest dimension; compare against the global
+        # maximum to get the refinement level (same logic as the original loop).
+        max_dim_width = np.max(
+            block_width, axis=1
+        )  # (n_blocks,) — largest dim per block
+        global_max_width = np.max(max_dim_width)  # scalar — coarsest block
+        refinement_ratio = global_max_width / max_dim_width
+        block_levels = np.round(np.log2(refinement_ratio)).astype(np.uint64)
 
         # Count number of blocks - note that a block at level l
         # requires its parent blocks at levels < l to be present
@@ -146,9 +129,9 @@ class DyabloOctreeIndex(OctreeIndex):
         # Add all blocks as octs at their appropriate levels
         # Each block gets file_ind from 0 to n_blocks-1
         self.oct_handler.add(
-            1,  # domain 1
-            -1,  # use levels array
-            block_centers,  # positions
+            curdom=1,
+            curlevel=-1,
+            pos=block_centers.astype(np.float64),
             levels=block_levels,
         )
 
@@ -305,18 +288,14 @@ class DyabloOctreeSubset(OctreeSubset):
         oct_handler = self.oct_handler
         cell_count = selector.count_oct_cells(oct_handler)
 
-        # Initialize data container
-        data = {field: np.zeros(cell_count, "float64") for field in fields}
-
         # Early exit if no cells are selected
         if cell_count == 0:
-            return data
+            return {}
 
         _level_inds, cell_inds, file_inds = oct_handler.file_index_octs(
             selector, 1, cell_count
         )
 
-        fname = self.ds._hydro_filename
         cells_per_block = self.index._cells_per_block
         block_size = self.ds.block_size  # (N, M, L)
 
@@ -331,11 +310,12 @@ class DyabloOctreeSubset(OctreeSubset):
         # Flat HDF5 index: block_offset + cell_within_block
         indices = file_inds * cells_per_block + file_cell_inds
 
+        data = {field: np.zeros(len(indices), "float64") for field in fields}
+
         with h5py.File(self.ds._hydro_filename, "r") as f:
             for ftype, fname in fields:
                 field_path = f"/{fname}"
                 if field_path in f:
-                    # Apply cell-level mask
                     data[ftype, fname] = f[field_path][:][indices].astype("float64")
                 else:
                     raise KeyError(
