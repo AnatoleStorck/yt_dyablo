@@ -113,6 +113,25 @@ class DyabloOctreeIndex(OctreeIndex):
         refinement_ratio = global_max_width / max_dim_width
         block_levels = np.round(np.log2(refinement_ratio)).astype(np.uint64)
 
+        # Update ds.max_level to the actual maximum refinement level present in
+        # the data, overriding any under-estimate from _parse_parameter_file.
+        lvl_max = block_levels.max()
+        if lvl_max != self.ds.max_level:
+            mylog.info(
+                "Updating ds.max_level from %d to %d based on block structure",
+                self.ds.max_level,
+                lvl_max,
+            )
+            self.ds.max_level = lvl_max
+        lvl_min = block_levels.min()
+        if lvl_min != self.ds.min_level:
+            mylog.info(
+                "Updating ds.min_level from %d to %d based on block structure",
+                self.ds.min_level,
+                lvl_min,
+            )
+            self.ds.min_level = lvl_min
+
         # Count number of blocks - note that a block at level l
         # requires its parent blocks at levels < l to be present
         # so we need to add them as well
@@ -286,7 +305,9 @@ class DyabloOctreeSubset(OctreeSubset):
             Dictionary mapping (ftype, fname) to selected data arrays
         """
         oct_handler = self.oct_handler
-        cell_count = selector.count_oct_cells(oct_handler)
+        # Only count cells in local domain [there is one single domain
+        # so this should be 1]
+        cell_count = selector.count_oct_cells(oct_handler, 1)
 
         # Early exit if no cells are selected
         if cell_count == 0:
