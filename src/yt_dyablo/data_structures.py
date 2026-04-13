@@ -645,34 +645,45 @@ class DyabloDataset(Dataset):
 
     def _set_code_unit_attributes(self):
         """Set code unit attributes."""
-        # Try to read units from file, otherwise use defaults
-        try:
-            with h5py.File(self._hydro_filename, "r") as f:
-                if "/units" in f:
-                    units_data = f["/units"][:]
-                    # Assume format: [length_unit, mass_unit, time_unit, ...]
-                    if len(units_data) >= 3:
-                        length_unit = float(units_data[0])
-                        mass_unit = float(units_data[1])
-                        time_unit = float(units_data[2])
-                    else:
-                        raise ValueError("Not enough units data")
-                else:
-                    raise ValueError("No units found in file")
-        except Exception:
-            # Fall back to defaults
-            mylog.warning(
-                "Could not read units from HDF5 file. Using default code units."
-            )
-            length_unit = 1.0
-            mass_unit = 1.0
-            time_unit = 1.0
+        override_keys = set((self.units_override or {}).keys())
+        needs_base_units = any(
+            k not in override_keys for k in ("length_unit", "mass_unit", "time_unit")
+        )
 
-        # Set units
-        self.length_unit = self.quan(length_unit, "cm")
-        self.mass_unit = self.quan(mass_unit, "g")
-        self.time_unit = self.quan(time_unit, "s")
-        self.velocity_unit = self.length_unit / self.time_unit
+        length_unit = mass_unit = time_unit = None
+        if needs_base_units:
+            # Try to read units from file, otherwise use defaults.
+            try:
+                with h5py.File(self._hydro_filename, "r") as f:
+                    if "/units" in f:
+                        units_data = f["/units"][:]
+                        # Assume format: [length_unit, mass_unit, time_unit, ...]
+                        if len(units_data) >= 3:
+                            length_unit = float(units_data[0])
+                            mass_unit = float(units_data[1])
+                            time_unit = float(units_data[2])
+                        else:
+                            raise ValueError("Not enough units data")
+                    else:
+                        raise ValueError("No units found in file")
+            except Exception:
+                # Fall back to defaults
+                mylog.warning(
+                    "Could not read units from HDF5 file. Using default code units."
+                )
+                length_unit = 1.0
+                mass_unit = 1.0
+                time_unit = 1.0
+
+        # Respect units_override values that were set in yt's _override_code_units.
+        if "length_unit" not in override_keys:
+            self.length_unit = self.quan(length_unit, "cm")
+        if "mass_unit" not in override_keys:
+            self.mass_unit = self.quan(mass_unit, "g")
+        if "time_unit" not in override_keys:
+            self.time_unit = self.quan(time_unit, "s")
+        if "velocity_unit" not in override_keys:
+            self.velocity_unit = self.length_unit / self.time_unit
 
         # Register dyablo as a fluid type
         self.fluid_types += ("dyablo",)
